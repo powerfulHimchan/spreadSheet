@@ -11,8 +11,8 @@ android {
         applicationId = "com.powerfulhimchan.familyledger"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
     buildFeatures { compose = true; buildConfig = true }
     signingConfigs.getByName("debug") {
@@ -38,5 +38,4 @@ dependencies {
     implementation("androidx.room:room-ktx:2.7.2")
     kapt("androidx.room:room-compiler:2.7.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
-    implementation("com.google.android.gms:play-services-auth:22.0.0")
 }

@@ -2,52 +2,59 @@ package com.powerfulhimchan.familyledger
 
 import com.powerfulhimchan.familyledger.core.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URLEncoder
 import java.math.BigDecimal
 
 data class SheetInfo(val id: Int,val title: String,val rows: Int,val columns: Int)
 data class BookInfo(val id: String,val title: String,val sheets: List<SheetInfo>)
 class ApiFailure(val status: Int,message: String): Exception(message)
 
-class SheetsApi(private val token: () -> String?) {
-    private val base="https://sheets.googleapis.com/v4/spreadsheets/"
-    private fun enc(s: String)=URLEncoder.encode(s,"UTF-8")
-    private suspend fun call(path: String, body: JSONObject? = null): JSONObject = withContext(Dispatchers.IO) {
-        val access=token() ?: throw ApiFailure(401,"Google 계정 연결이 필요합니다.")
-        var attempts=0
+class SheetsApi(private val connection: () -> RelayConnection) {
+    private suspend fun call(operation: String, id: String, payload: JSONObject = JSONObject()): JSONObject = withContext(Dispatchers.IO) {
+        val settings=connection().also { it.validate() }
+        require(id.matches(Regex("[A-Za-z0-9_-]+")))
+        val body=payload.put("operation",operation).put("spreadsheetId",id).put("key",settings.key).toString().toByteArray(Charsets.UTF_8)
+        var url=URI(settings.endpoint)
+        var post=true
+        var redirects=0
         while(true) {
-            val conn=URI(base+path).toURL().openConnection() as HttpURLConnection
+            val conn=url.toURL().openConnection() as HttpURLConnection
             try {
-                conn.connectTimeout=20000;conn.readTimeout=30000;conn.instanceFollowRedirects=false
-                conn.setRequestProperty("Authorization","Bearer $access")
-                if(body!=null) {
+                conn.connectTimeout=20000;conn.readTimeout=60000;conn.instanceFollowRedirects=false
+                if(post) {
                     conn.requestMethod="POST";conn.doOutput=true;conn.setRequestProperty("Content-Type","application/json; charset=utf-8")
-                    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    conn.outputStream.use { it.write(body) }
                 }
                 val status=conn.responseCode
-                if(status==429 || status in 500..599) {
-                    // Mutations are not blindly retried: the first request may already have committed.
-                    if(body==null && attempts<3) { delay((1000L shl attempts)+java.util.Random().nextInt(300));attempts++;continue }
+                if(status in setOf(301,302,303)) {
+                    val target=conn.getHeaderField("Location")?.let { runCatching { url.resolve(it) }.getOrNull() }
+                    check(target!=null && target.scheme=="https" && target.host=="script.googleusercontent.com" && target.port==-1 && target.userInfo==null && redirects++<3) {
+                        "웹 앱 접근 권한을 '모든 사용자'로 배포했는지 확인해 주세요."
+                    }
+                    // Follow the ContentService response without forwarding credentials or POST data.
+                    url=target;post=false;continue
                 }
                 if(status !in 200..299) throw ApiFailure(status,when(status) {
-                    401 -> "인증이 만료되었습니다. Google 계정을 다시 연결해 주세요."
-                    403 -> "시트 공유 권한과 Google Sheets API 활성화 여부를 확인해 주세요."
-                    404 -> "스프레드시트를 찾을 수 없습니다. 주소와 접근 권한을 확인해 주세요."
+                    401,403 -> "웹 앱 접근 권한과 중계 주소를 확인해 주세요."
+                    404 -> "중계 서버를 찾을 수 없습니다. /exec 주소와 배포 상태를 확인해 주세요."
                     429 -> "요청이 많습니다. 잠시 후 새로고침해 주세요."
-                    else -> "시트 요청에 실패했습니다($status). 저장 중이었다면 새로고침하여 반영 여부를 확인해 주세요."
+                    else -> "중계 요청에 실패했습니다($status). 저장 중이었다면 새로고침하여 반영 여부를 확인해 주세요."
                 })
                 val bytes=conn.inputStream.use { input ->
                     val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
                     while(true) { val count=input.read(buffer);if(count<0) break;check(out.size()+count<=25*1024*1024) { "데이터가 큽니다. 입력 영역을 나누어 연결해 주세요." };out.write(buffer,0,count) }
                     out.toByteArray()
                 }
-                return@withContext JSONObject(bytes.toString(Charsets.UTF_8))
+                val result=runCatching { JSONObject(bytes.toString(Charsets.UTF_8)) }.getOrElse {
+                    throw ApiFailure(502,"중계 서버 응답을 읽지 못했습니다. 최신 코드와 웹 앱 배포 설정을 확인해 주세요.")
+                }
+                if(!result.optBoolean("ok")) throw ApiFailure(result.optInt("status",500),result.optString("message","중계 요청을 완료하지 못했습니다."))
+                check(result.optInt("protocol") == 1) { "중계 코드 버전이 맞지 않습니다. 최신 코드로 배포해 주세요." }
+                return@withContext result.getJSONObject("data")
             } finally { conn.disconnect() }
         }
         @Suppress("UNREACHABLE_CODE") JSONObject()
@@ -55,7 +62,7 @@ class SheetsApi(private val token: () -> String?) {
 
     suspend fun book(id: String): BookInfo {
         require(id.matches(Regex("[A-Za-z0-9_-]+")))
-        val o=call("$id?fields="+enc("spreadsheetId,properties(title),sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"))
+        val o=call("book",id)
         val arr=o.getJSONArray("sheets")
         return BookInfo(id,o.getJSONObject("properties").getString("title"),(0 until arr.length()).mapNotNull { i ->
             val p=arr.getJSONObject(i).getJSONObject("properties");val g=p.optJSONObject("gridProperties") ?: return@mapNotNull null
@@ -63,9 +70,7 @@ class SheetsApi(private val token: () -> String?) {
         })
     }
     suspend fun grid(id: String, sheet: SheetInfo): Grid {
-        val range="${A1.quote(sheet.title)}!A1:${A1.col(minOf(sheet.columns,200)-1)}${minOf(sheet.rows,10000)}"
-        val mask="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)),data(startRow,startColumn,rowData(values(userEnteredValue,effectiveValue,effectiveFormat(numberFormat),dataValidation))))"
-        val o=call("$id?ranges=${enc(range)}&fields=${enc(mask)}")
+        val o=call("grid",id,JSONObject().put("sheetId",sheet.id))
         val s=o.getJSONArray("sheets").getJSONObject(0);val data=s.optJSONArray("data")
         val rows=mutableListOf<List<Cell>>()
         if(data!=null) for(d in 0 until data.length()) {
@@ -80,11 +85,13 @@ class SheetsApi(private val token: () -> String?) {
             }
         }
         // Grid completeness refers to the loaded coordinate limits, even when trailing rows are empty.
-        var result=Grid(id,sheet.id,sheet.title,rows,sheet.rows,sheet.columns,sheet.rows<=10000 && sheet.columns<=200)
+        val properties=s.getJSONObject("properties");val dimensions=properties.getJSONObject("gridProperties")
+        val rowCount=dimensions.getInt("rowCount");val columnCount=dimensions.getInt("columnCount")
+        var result=Grid(id,sheet.id,properties.getString("title"),rows,rowCount,columnCount,rowCount<=10000 && columnCount<=200,o.getString("_relayRevision"))
         val refs=rows.flatten().mapNotNull { it.validationRange }.filter { it!="custom-checkbox" }.distinct()
         val resolved=mutableMapOf<String,List<String>>()
         for(ref in refs.take(30)) runCatching {
-            val values=call("$id/values/${enc(ref.removePrefix("="))}?valueRenderOption=UNFORMATTED_VALUE").optJSONArray("values")
+            val values=call("values",id,JSONObject().put("range",ref.removePrefix("="))).optJSONArray("values")
             if(values!=null) resolved[ref]=(0 until values.length()).flatMap { i -> val row=values.getJSONArray(i);(0 until row.length()).map { j -> row.get(j).toString() } }.filter { it.isNotBlank() }.distinct()
         }
         result=result.copy(rows=result.rows.map { row -> row.map { c -> if(c.validationRange in resolved) c.copy(options=resolved[c.validationRange].orEmpty()) else c } })
@@ -121,9 +128,9 @@ class SheetsApi(private val token: () -> String?) {
             .put("rows",JSONArray().put(JSONObject().put("values",JSONArray().put(data))))
             .put("fields",if(format==null) "userEnteredValue" else "userEnteredValue,userEnteredFormat.numberFormat"))
     }
-    suspend fun write(id: String,sheetId: Int,plan: WritePlan) {
+    suspend fun write(grid: Grid,plan: WritePlan) {
         if(plan.cells.isEmpty()) return
-        call("$id:batchUpdate",JSONObject().put("requests",JSONArray(plan.cells.map { cellRequest(sheetId,it) })))
+        call("mutate",grid.spreadsheetId,JSONObject().put("sheetId",grid.sheetId).put("revision",grid.revision ?: error("중계 서버에서 최신 데이터를 불러와 주세요.")).put("requests",JSONArray(plan.cells.map { cellRequest(grid.sheetId,it) })))
     }
     suspend fun installIdentity(grid: Grid,m: TableMapping): TableMapping {
         Writes.verifyStructure(grid,m)
@@ -153,7 +160,7 @@ class SheetsApi(private val token: () -> String?) {
             requests.put(JSONObject().put("updateDimensionProperties",JSONObject().put("range",JSONObject().put("sheetId",grid.sheetId).put("dimension","COLUMNS").put("startIndex",grid.columnCount).put("endIndex",nextIndex)).put("properties",JSONObject().put("hiddenByUser",true)).put("fields","hiddenByUser")))
         }
         writes.forEach { requests.put(cellRequest(grid.sheetId,it)) }
-        if(requests.length()>0) call("${grid.spreadsheetId}:batchUpdate",JSONObject().put("requests",requests))
+        if(requests.length()>0) call("mutate",grid.spreadsheetId,JSONObject().put("sheetId",grid.sheetId).put("revision",grid.revision ?: error("중계 서버에서 최신 데이터를 불러와 주세요.")).put("requests",requests))
         return m.copy(columns=m.columns+listOf(id,deleted).filter { col->m.columns.none { it.role==col.role } })
     }
 }

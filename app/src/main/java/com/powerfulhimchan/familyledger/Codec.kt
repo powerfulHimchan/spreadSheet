@@ -33,11 +33,11 @@ object Codec {
     }
     fun cell(o: JSONObject): Cell = Cell(o.optString("value"),ValueKind.valueOf(o.getString("kind")),o.optString("format"),o.optString("pattern"),if(o.isNull("formula")) null else o.getString("formula"),strings(o.optJSONArray("options")),if(o.isNull("validationRange")) null else o.getString("validationRange"),o.optBoolean("checkbox"))
     fun grid(g: Grid): String = JSONObject().apply {
-        put("spreadsheetId",g.spreadsheetId);put("sheetId",g.sheetId);put("title",g.title);put("rowCount",g.rowCount);put("columnCount",g.columnCount);put("complete",g.complete)
+        put("spreadsheetId",g.spreadsheetId);put("sheetId",g.sheetId);put("title",g.title);put("rowCount",g.rowCount);put("columnCount",g.columnCount);put("complete",g.complete);put("revision",g.revision ?: JSONObject.NULL)
         put("rows",JSONArray(g.rows.map { row -> JSONArray(row.map { cell(it) }) }))
     }.toString()
     fun grid(raw: String): Grid {
         val o=JSONObject(raw);val rows=o.getJSONArray("rows")
-        return Grid(o.getString("spreadsheetId"),o.getInt("sheetId"),o.getString("title"),(0 until rows.length()).map { r -> val row=rows.getJSONArray(r);(0 until row.length()).map { c -> cell(row.getJSONObject(c)) } },o.getInt("rowCount"),o.getInt("columnCount"),o.optBoolean("complete",true))
+        return Grid(o.getString("spreadsheetId"),o.getInt("sheetId"),o.getString("title"),(0 until rows.length()).map { r -> val row=rows.getJSONArray(r);(0 until row.length()).map { c -> cell(row.getJSONObject(c)) } },o.getInt("rowCount"),o.getInt("columnCount"),o.optBoolean("complete",true),if(o.isNull("revision")) null else o.getString("revision"))
     }
 }

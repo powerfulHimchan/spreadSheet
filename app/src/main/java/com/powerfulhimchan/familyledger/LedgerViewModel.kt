@@ -4,8 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.Room
-import com.google.android.gms.auth.api.identity.ClearTokenRequest
-import com.google.android.gms.auth.api.identity.Identity
 import com.powerfulhimchan.familyledger.core.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,8 +34,13 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
     private val dao=db.dao()
     private val mutable=MutableStateFlow(AppState())
     val state=mutable.asStateFlow()
-    var accessToken: String? = null
-    private val api=SheetsApi { accessToken }
+    private val relaySettings=RelaySettings(app)
+    private var relay=relaySettings.read()
+    private val api=SheetsApi { relay }
+    fun relayConnection()=relay
+    fun configureRelay(endpoint: String,key: String): Boolean = try {
+        val next=RelayConnection(endpoint.trim(),key.trim());relaySettings.save(next);relay=next;true
+    } catch(e: Exception) { message(e.message ?: "연결 설정을 저장하지 못했습니다.");false }
     init { runTask { val connections=dao.connections().map { c -> Codec.mapping(c.payload) };mutable.update { it.copy(connections=connections) } } }
     fun clearMessage() { mutable.update { it.copy(message=null) } }
     fun message(text: String) { mutable.update { it.copy(message=text) } }
@@ -47,9 +50,6 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
         viewModelScope.launch {
             try { action() } catch(e: Exception) {
                 if(e is kotlinx.coroutines.CancellationException) throw e
-                if(e is ApiFailure && e.status==401) {
-                    accessToken?.let { Identity.getAuthorizationClient(getApplication<Application>()).clearToken(ClearTokenRequest.builder().setToken(it).build()) };accessToken=null
-                }
                 mutable.update { it.copy(message=if(e is java.io.IOException) "네트워크 연결을 확인해 주세요. 저장 중이었다면 새로고침해 반영 여부를 확인해 주세요." else e.message ?: "작업을 완료하지 못했습니다.") }
             } finally { mutable.update { it.copy(busy=false) } }
         }
@@ -101,7 +101,7 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
         if(g.spreadsheetId=="demo") show(g,named) else persist(g,named)
     }
     fun openConnection(m: TableMapping) = runTask {
-        val s=dao.snapshot(m.key) ?: error("저장된 데이터가 없습니다. Google 계정 연결 후 새로고침해 주세요.")
+        val s=dao.snapshot(m.key) ?: error("저장된 데이터가 없습니다. 중계 설정 후 새로고침해 주세요.")
         show(Codec.grid(s.payload),m,true,s.updated)
     }
     fun openMonth(yearMonth: java.time.YearMonth) {
@@ -171,7 +171,7 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
         val g=if(m.spreadsheetId=="demo") s.grid!! else fresh(m)
         val plan=if(original==null) Writes.add(g,m,input) else Writes.edit(g,m,original,input,delete)
         if(m.spreadsheetId=="demo") show(Demo.apply(g,plan),m) else {
-            api.write(m.spreadsheetId,m.sheetId,plan)
+            api.write(g,plan)
             persist(fresh(m),m)
         }
     }
@@ -180,7 +180,6 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
         mutable.value=AppState(connections=dao.connections().map { Codec.mapping(it.payload) },busy=true)
     }
     fun clearDeviceData() = runTask {
-        accessToken?.let { Identity.getAuthorizationClient(getApplication<Application>()).clearToken(ClearTokenRequest.builder().setToken(it).build()) }
-        accessToken=null;dao.clearSnapshots();dao.clearConnections();mutable.value=AppState(busy=true)
+        relaySettings.clear();relay=RelayConnection();dao.clearSnapshots();dao.clearConnections();mutable.value=AppState(busy=true)
     }
 }

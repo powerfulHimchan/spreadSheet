@@ -1,15 +1,15 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 package com.powerfulhimchan.familyledger
 
-import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.os.Bundle
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -40,9 +40,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.android.gms.auth.api.identity.AuthorizationRequest
-import com.google.android.gms.auth.api.identity.Identity
-import com.google.android.gms.common.api.Scope
 import com.powerfulhimchan.familyledger.core.*
 import java.math.BigDecimal
 import java.text.DecimalFormat
@@ -62,34 +59,11 @@ private fun typeName(t: FieldType)=when(t) { FieldType.TEXT->"문자";FieldType.
 
 class MainActivity: ComponentActivity() {
     private val model: LedgerViewModel by viewModels()
-    private var continuation: (() -> Unit)? = null
-    private val authorization=registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if(result.resultCode!=Activity.RESULT_OK || result.data==null) { continuation=null;model.message("Google 계정 연결을 취소했습니다.");return@registerForActivityResult }
-        runCatching { Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(result.data!!) }
-            .onSuccess { response ->
-                val token=response.accessToken
-                if(token.isNullOrBlank()) { continuation=null;model.message("시트 접근 권한을 받지 못했습니다.") }
-                else { model.accessToken=token;val action=continuation;continuation=null;action?.invoke() }
-            }.onFailure { continuation=null;model.message("Google 인증에 실패했습니다. OAuth의 패키지명과 SHA-1 등록을 확인해 주세요.") }
-    }
-    private fun authorize(action: ()->Unit) {
-        if(continuation!=null) return
-        continuation=action
-        val request=AuthorizationRequest.builder().setRequestedScopes(listOf(Scope("https://www.googleapis.com/auth/spreadsheets"))).build()
-        Identity.getAuthorizationClient(this).authorize(request).addOnSuccessListener { response ->
-            if(response.hasResolution()) authorization.launch(IntentSenderRequest.Builder(response.pendingIntent!!.intentSender).build())
-            else {
-                val token=response.accessToken
-                if(token.isNullOrBlank()) { continuation=null;model.message("시트 접근 권한을 받지 못했습니다.") }
-                else { model.accessToken=token;val next=continuation;continuation=null;next?.invoke() }
-            }
-        }.addOnFailureListener { continuation=null;model.message("Google 인증을 시작하지 못했습니다. Google Cloud에서 이 앱의 Android OAuth 설정을 완료해 주세요.") }
-    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         setContent { MaterialTheme(colorScheme=lightColorScheme(primary=Blue,onPrimary=Color.White,background=Background,surface=Color.White,onSurface=Ink,outline=Line),shapes=Shapes(small=RoundedCornerShape(0.dp),medium=RoundedCornerShape(0.dp),large=RoundedCornerShape(0.dp))) {
-            LedgerApp(model,::authorize)
+            LedgerApp(model)
         } }
     }
 }
@@ -110,7 +84,7 @@ class MainActivity: ComponentActivity() {
 }
 private data class Editor(val record: Record?,val copy: Boolean=false)
 
-@Composable private fun LedgerApp(vm: LedgerViewModel,authorize: (() -> Unit)->Unit) {
+@Composable private fun LedgerApp(vm: LedgerViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     var tab by remember { mutableIntStateOf(0) }
     var connect by remember { mutableStateOf(false) }
@@ -132,7 +106,7 @@ private data class Editor(val record: Record?,val copy: Boolean=false)
         category="전체";author="전체";search="";direction="전체"
     }
     LaunchedEffect(state.revision) { editor=null;mappingEdit=false }
-    fun online(action: ()->Unit) { if(m?.spreadsheetId=="demo") action() else authorize(action) }
+    fun online(action: ()->Unit) { action() }
     fun changeMonth(next: YearMonth) { month=next;vm.openMonth(next) }
     val records=if(m?.column(Role.DATE)==null) state.parsed.records else state.parsed.records.filter { it.date?.let { d -> YearMonth.from(d)==month } == true }
     val filtered=records.filter { r -> (category=="전체" || r.category==category) && (author=="전체" || r.author==author) && (direction=="전체" || r.income==(direction=="수입")) && (search.isBlank() || listOf(r.description,r.category,r.payment,r.author).any { it.contains(search,true) }) }
@@ -178,13 +152,15 @@ private data class Editor(val record: Record?,val copy: Boolean=false)
                         if(state.connections.isNotEmpty()) item { Panel { Text("저장한 연결",fontWeight=FontWeight.Bold);state.connections.forEach { connection -> TextButton(onClick={vm.openConnection(connection)},enabled=!state.busy) { Text(connection.displayName) } } } }
                         item { Panel { Text("다른 구조 체험",fontWeight=FontWeight.Bold);listOf("월별 탭 + 일자","일반 수입·지출 목록","열 순서가 다른 영문 장부").forEachIndexed { i,label -> TextButton(onClick={vm.demo(i)},enabled=!state.busy) { Text(label) } } } }
                         item { Panel { Text("데이터 확인",fontWeight=FontWeight.Bold);if(state.parsed.issues.isEmpty()) Text("파싱 오류가 없습니다.",color=Muted);state.parsed.issues.take(80).forEach { issue -> Text("${issue.row}행 · ${issue.column}: ${issue.message}",fontSize=13.sp) };if(state.parsed.issues.size>80) Text("그 외 ${state.parsed.issues.size-80}건") } }
-                        item { Panel { Text("개인정보",fontWeight=FontWeight.Bold);Text("장부는 Google Sheets와 기기 안에서 처리됩니다. 별도 서버로 전송하지 않습니다. 로컬 데이터 백업과 화면 캡처는 차단됩니다.",color=Muted,fontSize=13.sp);OutlinedButton(onClick={confirmClear=true},enabled=!state.busy) { Text("기기에 저장한 연결·데이터 지우기") };TextButton(onClick={vm.disconnect()},enabled=!state.busy) { Text("현재 장부 연결 해제") } } }
+                        item { Panel { Text("개인정보",fontWeight=FontWeight.Bold);Text("장부는 지정한 Apps Script 중계 서버를 통해 Google Sheets와 기기 사이에서 처리됩니다. 연결키는 기기에 암호화해 저장합니다. 로컬 데이터 백업과 화면 캡처는 차단됩니다.",color=Muted,fontSize=13.sp);OutlinedButton(onClick={confirmClear=true},enabled=!state.busy) { Text("기기에 저장한 연결·중계 설정 지우기") };TextButton(onClick={vm.disconnect()},enabled=!state.busy) { Text("현재 장부 연결 해제") } } }
                     }
                 }
             }
         }
     }
-    if(connect) ConnectDialog(state.busy,{connect=false}) { url -> connect=false;authorize { vm.connect(url) } }
+    if(connect) ConnectDialog(state.busy,vm.relayConnection(),{connect=false}) { url,endpoint,key ->
+        if(vm.configureRelay(endpoint,key)) { connect=false;vm.connect(url) }
+    }
     if(state.book!=null && state.setupGrid==null) AlertDialog(onDismissRequest={if(!state.busy) vm.cancelSetup()},title={Text(state.book!!.title)},text={Column(Modifier.verticalScroll(rememberScrollState())) { Text("연결할 탭을 선택해 주세요.");state.book!!.sheets.forEach { sheet -> TextButton(onClick={vm.chooseSheet(sheet)},enabled=!state.busy) { Text(sheet.title) } } }},confirmButton={},dismissButton={TextButton(onClick={vm.cancelSetup()},enabled=!state.busy){Text("취소")}})
     if(state.setupGrid!=null || (mappingEdit && m!=null && state.grid!=null)) MappingDialog(state.setupGrid ?: state.grid!!,if(state.setupGrid==null || state.setupGrid?.let { m!=null && it.sheetId==m.sheetId && it.spreadsheetId==m.spreadsheetId }==true) m else null,state.busy,{mappingEdit=false;vm.cancelSetup()},{vm.saveMapping(it)})
     if(editor!=null && m!=null) {
@@ -192,7 +168,7 @@ private data class Editor(val record: Record?,val copy: Boolean=false)
         EditorDialog(m,editing,state.parsed.records,state.busy,{editor=null},onSave={values -> online { vm.save(if(editing.copy) null else editing.record,values) }},onDelete={online { vm.save(editing.record,emptyMap(),true) }})
     }
     if(confirmIdentity) AlertDialog(onDismissRequest={confirmIdentity=false},title={Text("안전한 편집 설정")},text={Text("시트 오른쪽 끝에 필요한 ID·삭제 상태 열을 추가하고 숨깁니다(최대 2개). 기존 ID가 비어 있으면 고유 ID를 채웁니다. 원래 거래 값과 수식은 유지됩니다. 지정한 입력 범위를 먼저 확인해 주세요.")},confirmButton={TextButton(onClick={confirmIdentity=false;online { vm.installIdentity() }},enabled=!state.busy){Text("열 추가하고 설정")}},dismissButton={TextButton(onClick={confirmIdentity=false}){Text("나중에")}})
-    if(confirmClear) AlertDialog(onDismissRequest={confirmClear=false},title={Text("이 기기의 데이터 지우기")},text={Text("저장한 연결 설정과 오프라인 데이터를 지웁니다. 원본 스프레드시트는 유지됩니다.")},confirmButton={TextButton(onClick={confirmClear=false;vm.clearDeviceData()}){Text("지우기")}},dismissButton={TextButton(onClick={confirmClear=false}){Text("취소")}})
+    if(confirmClear) AlertDialog(onDismissRequest={confirmClear=false},title={Text("이 기기의 데이터 지우기")},text={Text("저장한 연결 설정·중계 주소·연결키·오프라인 데이터를 지웁니다. 원본 스프레드시트는 유지됩니다.")},confirmButton={TextButton(onClick={confirmClear=false;vm.clearDeviceData()}){Text("지우기")}},dismissButton={TextButton(onClick={confirmClear=false}){Text("취소")}})
     if(confirmMonthly) AlertDialog(onDismissRequest={confirmMonthly=false},title={Text("월별 탭을 함께 연결할까요?")},text={Text("같은 스프레드시트에서 헤더가 일치하는 월별 탭을 읽고 현재 표의 매핑을 적용합니다. 시트에는 쓰지 않습니다. 연결 후 각 탭의 입력 범위를 확인해 주세요.")},confirmButton={TextButton(onClick={confirmMonthly=false;online { vm.linkMonthlyTabs() }},enabled=!state.busy){Text("함께 연결")}},dismissButton={TextButton(onClick={confirmMonthly=false}){Text("취소")}})
 }
 
@@ -395,9 +371,36 @@ private object GroupedNumber: VisualTransformation {
         if(state.connections.isNotEmpty()) item { Panel { Text("저장한 장부",fontWeight=FontWeight.Bold);state.connections.forEach { m -> TextButton(onClick={vm.openConnection(m)},enabled=!state.busy) { Text(m.displayName) } } } }
     }
 }
-@Composable private fun ConnectDialog(busy: Boolean,onDismiss: ()->Unit,onConnect: (String)->Unit) {
+@Composable private fun ConnectDialog(busy: Boolean,existing: RelayConnection,onDismiss: ()->Unit,onConnect: (String,String,String)->Unit) {
     var url by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest=onDismiss,title={Text("스프레드시트 연결")},text={Column(verticalArrangement=Arrangement.spacedBy(12.dp)) { Text("공유받은 시트의 URL을 붙여 넣어 주세요. Google 계정의 공유 권한으로 접근합니다.",color=Muted);OutlinedTextField(url,{url=it},label={Text("구글 스프레드시트 URL")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Uri),modifier=Modifier.fillMaxWidth()) }},confirmButton={TextButton(onClick={onConnect(url)},enabled=A1.spreadsheetId(url)!=null && !busy){Text("계정 연결하고 불러오기")}},dismissButton={TextButton(onClick=onDismiss){Text("취소")}})
+    var endpoint by remember { mutableStateOf(existing.endpoint) }
+    var key by remember { mutableStateOf(existing.key) }
+    val context=LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    var validationError by remember { mutableStateOf<String?>(null) }
+    AlertDialog(onDismissRequest=onDismiss,title={Text("스프레드시트 연결")},text={
+        Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text("Apps Script 중계 주소와 가족 연결키로 연결합니다. Google 계정 선택은 필요하지 않습니다.",color=Muted)
+            OutlinedTextField(endpoint,{endpoint=it.trim()},label={Text("중계 웹 앱 주소 (/exec)")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Uri),modifier=Modifier.fillMaxWidth(),singleLine=true)
+            OutlinedTextField(key,{key=it.trim();copied=false},label={Text("가족 연결키")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Ascii),modifier=Modifier.fillMaxWidth(),singleLine=true)
+            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick={key=RelayConnection.generateKey();copied=false}) { Text("새 연결키 생성") }
+                TextButton(onClick={
+                    val clipboard=context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip=ClipData.newPlainText("가족 연결키",key)
+                    if(android.os.Build.VERSION.SDK_INT>=33) clip.description.extras=android.os.PersistableBundle().apply { putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE,true) }
+                    clipboard.setPrimaryClip(clip);copied=true
+                },enabled=key.isNotBlank()) { Text(if(copied) "복사됨" else "연결키 복사") }
+            }
+            Text("최초 설정 시 생성한 키를 스크립트의 FAMILY_KEY 속성에도 똑같이 등록해 주세요. 새 키를 생성하면 서버 설정도 변경해야 합니다.",fontSize=12.sp,color=Muted)
+            OutlinedTextField(url,{url=it},label={Text("구글 스프레드시트 URL")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Uri),modifier=Modifier.fillMaxWidth())
+            validationError?.let { Text(it,color=MaterialTheme.colorScheme.error,fontSize=12.sp) }
+        }
+    },confirmButton={TextButton(onClick={
+        runCatching { RelayConnection(endpoint.trim(),key.trim()).validate() }
+            .onSuccess { validationError=null;onConnect(url,endpoint,key) }
+            .onFailure { validationError=it.message }
+    },enabled=A1.spreadsheetId(url)!=null && endpoint.isNotBlank() && key.length>=32 && !busy){Text("연결하고 불러오기")}},dismissButton={TextButton(onClick=onDismiss){Text("취소")}})
 }
 @Composable private fun MonthSelector(month: YearMonth,onChange: (YearMonth)->Unit) {
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {

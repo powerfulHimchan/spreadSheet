@@ -29,7 +29,8 @@ data class Grid(
     val rows: List<List<Cell>>,
     val rowCount: Int = rows.size,
     val columnCount: Int = rows.maxOfOrNull { it.size } ?: 0,
-    val complete: Boolean = true
+    val complete: Boolean = true,
+    val revision: String? = null
 ) {
     fun cell(row: Int, col: Int): Cell = rows.getOrNull(row)?.getOrNull(col) ?: Cell()
 }
