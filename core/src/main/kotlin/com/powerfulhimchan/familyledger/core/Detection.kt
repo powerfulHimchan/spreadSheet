@@ -58,7 +58,20 @@ object Detection {
                     labels, options.isNotEmpty(), inferredRole in setOf(Role.DATE, Role.AMOUNT), filled.firstOrNull { it.validationRange != null }?.validationRange,
                     if (dayMode) DateMode.DAY_OF_MONTH else DateMode.FULL_DATE,filled.isNotEmpty() && filled.all { it.kind==ValueKind.NUMBER })
         }
-        return TableMapping(grid.spreadsheetId, grid.sheetId, grid.title, header, start, end, lastRow, columns, year, month)
+        val uniqueRoles = columns.toMutableList()
+        columns.filter { it.role != Role.NONE }.groupBy { it.role }.filterValues { it.size > 1 }.forEach { (role, matches) ->
+            // A header alias is a suggestion, not a reason to choose the wrong monetary total.
+            // Keep one explicit previous choice; otherwise require the user to select a column.
+            val previous = old?.columns?.filter { it.role == role }?.singleOrNull()
+            val retainedKey = previous?.key?.takeIf { key -> matches.any { it.key == key } }
+            matches.forEach { column ->
+                if (column.key != retainedKey) {
+                    val position = uniqueRoles.indexOfFirst { it.key == column.key }
+                    uniqueRoles[position] = column.copy(role = Role.NONE)
+                }
+            }
+        }
+        return TableMapping(grid.spreadsheetId, grid.sheetId, grid.title, header, start, end, lastRow, uniqueRoles, year, month)
             .let { if (old == null) it else it.copy(month = old.month, numberStyle = old.numberStyle, expenseValues = old.expenseValues, incomeValues = old.incomeValues,bookTitle=old.bookTitle) }
     }
 

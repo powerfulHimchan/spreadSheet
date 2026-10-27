@@ -54,7 +54,7 @@ private val Muted=Color(0xFF64748B)
 private val Background=Color(0xFFEEF2F9)
 private val Line=Color(0xFFCFD8E6)
 private fun money(n: BigDecimal?) = n?.let { DecimalFormat("#,##0.##").format(it) } ?: "—"
-private fun roleName(r: Role)=when(r) { Role.NONE->"역할 없음";Role.DATE->"날짜";Role.AMOUNT->"금액";Role.CATEGORY->"카테고리";Role.DESCRIPTION->"내용·사용처";Role.PAYMENT->"결제수단";Role.AUTHOR->"작성자";Role.DIRECTION->"수입·지출 구분";Role.ID->"거래 ID";Role.DELETED->"삭제 여부" }
+private fun roleName(r: Role)=r.label
 private fun typeName(t: FieldType)=when(t) { FieldType.TEXT->"문자";FieldType.INTEGER->"정수";FieldType.DECIMAL->"소수";FieldType.CURRENCY->"통화";FieldType.PERCENT->"퍼센트";FieldType.DATE->"날짜";FieldType.TIME->"시간";FieldType.DATETIME->"날짜+시간";FieldType.BOOLEAN->"체크박스";FieldType.ENUM->"선택 목록";FieldType.PHONE->"전화번호";FieldType.EMAIL->"이메일";FieldType.URL->"URL" }
 
 class MainActivity: ComponentActivity() {
@@ -205,6 +205,12 @@ private data class Editor(val record: Record?,val copy: Boolean=false)
                 Row(Modifier.fillMaxWidth().padding(16.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) { Text("표 연결 설정",fontSize=22.sp,fontWeight=FontWeight.Bold);TextButton(onClick=onDismiss,enabled=!busy){Text("닫기")} }
                 LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                     item { Panel { Text(g.title,fontWeight=FontWeight.Bold);Text("사용할 표와 입력 영역을 확인해 주세요. 수식은 자동으로 보호됩니다.",fontSize=13.sp,color=Muted)
+                        val ambiguous=mapping.columns.filter { Detection.role(it.header)!=Role.NONE }.groupBy { Detection.role(it.header) }
+                            .filter { (role,candidates) -> candidates.size>1 && mapping.column(role)==null }
+                        ambiguous.forEach { (role,candidates) ->
+                            Text("${role.label} 후보가 여러 개입니다: ${candidates.joinToString { "${A1.col(it.index)}열(${it.header})" }}. 아래에서 사용할 열 하나에 '${role.label}' 역할을 지정해 주세요.",color=Blue,fontSize=13.sp)
+                        }
+                        Text("분석 역할은 종류별로 한 열만 사용합니다. 새 열에 역할을 지정하면 이전 열은 '역할 없음'으로 바뀌며 입력 데이터는 유지됩니다.",fontSize=12.sp,color=Muted)
                         if(suggestions.size>1) Choice("발견한 표",mapping,suggestions,{"${A1.col(it.firstColumn)}${it.headerRow+1}:${A1.col(it.endColumn-1)} · ${it.columns.joinToString { c->c.header }.take(38)}"},{choose(it)})
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(header,{header=it.filter(Char::isDigit)},Modifier.weight(1f),label={Text("헤더 행")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number))
@@ -232,7 +238,7 @@ private data class Editor(val record: Record?,val copy: Boolean=false)
                             if(sample.isNotEmpty()) Text("예: ${sample.joinToString(" / ")}",color=Muted,fontSize=12.sp,maxLines=2)
                             Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                                 Choice("타입",c.type,FieldType.entries,{typeName(it)},{update(c.copy(type=it))},Modifier.weight(1f))
-                                Choice("분석 역할",c.role,Role.entries,{roleName(it)},{role->update(c.copy(role=role,type=when(role){Role.DATE->FieldType.DATE;Role.AMOUNT->if(c.type in setOf(FieldType.INTEGER,FieldType.CURRENCY,FieldType.DECIMAL)) c.type else FieldType.CURRENCY;else->c.type}))},Modifier.weight(1f))
+                                Choice("분석 역할",c.role,Role.entries,{roleName(it)},{role->mapping=mapping.withRole(c.key,role);error=null},Modifier.weight(1f))
                             }
                             if(c.type==FieldType.DATE) Choice("날짜 저장 방식",c.dateMode,DateMode.entries,{if(it==DateMode.DAY_OF_MONTH) "탭의 연·월 + 일자" else "전체 날짜"},{update(c.copy(dateMode=it))})
                             val locked=(mapping.headerRow+1 until minOf(mapping.dataEndRow,g.rows.size)).any { g.cell(it,c.index).formula!=null } || c.validationRange!=null && c.options.isEmpty()

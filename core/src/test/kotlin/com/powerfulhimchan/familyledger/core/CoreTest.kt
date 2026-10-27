@@ -131,4 +131,57 @@ class CoreTest {
     @Test fun explicitTextMetadataOutranksNumericSamples() {
         assertEquals(FieldType.TEXT,Detection.infer(listOf(Cell("12345",ValueKind.STRING,"TEXT"),Cell("67890",ValueKind.STRING,"TEXT"))))
     }
+    private fun multipleAmounts() = Grid("generic-ledger",9,"10월",listOf(
+        listOf(str("날짜"),str("금액"),str("가격"),str("내용")),
+        listOf(str("2026-10-01"),num("1200"),num("900"),str("점심"))
+    ),20,4)
+    @Test fun ambiguousAmountsRequireAnExplicitChoiceAndDoNotSumTheWrongColumn() {
+        val g=multipleAmounts();val m=Detection.mapping(g,0,0,4,20,2026)
+        assertNull(m.column(Role.AMOUNT));assertTrue(m.validate().isEmpty())
+        assertEquals(2,m.columns.count { Detection.role(it.header)==Role.AMOUNT })
+        assertEquals(BigDecimal.ZERO,Ledger.totals(Ledger.parse(g,m).records).expense)
+        val selected=m.withRole(m.columns.first { it.header=="가격" }.key,Role.AMOUNT)
+        assertEquals(BigDecimal("900"),Ledger.totals(Ledger.parse(g,selected).records).expense)
+    }
+    @Test fun selectingAnotherAmountMovesTheRoleAndRetainsEveryInputColumn() {
+        val g=multipleAmounts();val m=Detection.mapping(g,0,0,4,20,2026)
+        val first=m.withRole(m.columns[1].key,Role.AMOUNT)
+        val moved=first.withRole(m.columns[2].key,Role.AMOUNT)
+        assertEquals(1,moved.columns.count { it.role==Role.AMOUNT })
+        assertEquals(Role.NONE,moved.columns[1].role)
+        assertEquals(m.columns.map { it.key },moved.columns.map { it.key })
+        assertEquals(m.columns.map { it.readOnly },moved.columns.map { it.readOnly })
+        assertEquals("1200",Ledger.parse(g,moved).records.single().cells[m.columns[1].key]?.value)
+        assertTrue(moved.validate().isEmpty())
+    }
+    @Test fun reDetectionKeepsTheExplicitAmountChoiceWhenAnAliasColumnAppears() {
+        val g=multipleAmounts();val detected=Detection.mapping(g,0,0,4,20,2026)
+        val old=detected.withRole(detected.columns[1].key,Role.AMOUNT).copy(columns=detected.columns.filter { it.header!="가격" }.map { if(it.header=="금액") it.copy(role=Role.AMOUNT) else it })
+        val current=Detection.mapping(g,0,0,4,20,2026,old)
+        assertEquals("금액",current.column(Role.AMOUNT)?.header)
+        assertEquals(Role.NONE,current.columns.first { it.header=="가격" }.role)
+        assertTrue(current.validate().isEmpty())
+    }
+    @Test fun noneMayBeAssignedToManyColumnsAndOtherRolesStayUnique() {
+        val g=multipleAmounts();val m=Detection.mapping(g,0,0,4,20,2026)
+        val moved=m.withRole(m.columns[3].key,Role.DATE)
+        assertEquals(Role.NONE,moved.columns[0].role)
+        assertEquals(FieldType.DATE,moved.columns[3].type)
+        val cleared=moved.withRole(m.columns[3].key,Role.NONE)
+        assertNull(cleared.column(Role.DATE));assertTrue(cleared.validate().isEmpty())
+        assertThrows(IllegalArgumentException::class.java) { m.withRole("missing",Role.AMOUNT) }
+    }
+    @Test fun duplicateRoleErrorsNameTheLocalizedRoleAndBothColumns() {
+        val g=multipleAmounts();val m=Detection.mapping(g,0,0,4,20,2026).let { mapping ->
+            mapping.copy(columns=mapping.columns.map { if(it.header in setOf("금액","가격")) it.copy(role=Role.AMOUNT) else it })
+        }
+        val message=m.validate().single()
+        assertTrue(message.contains("금액 역할"));assertTrue(message.contains("B열(금액)"));assertTrue(message.contains("C열(가격)"))
+        assertFalse(message.contains("AMOUNT"))
+    }
+    @Test fun ambiguousDateHeadersAreAlsoLeftForUserSelection() {
+        val g=multipleAmounts().copy(rows=listOf(listOf(str("날짜"),str("결제일"),str("금액")),listOf(str("2026-10-01"),str("2026-10-02"),num("1200"))))
+        val m=Detection.mapping(g,0,0,3,20,2026)
+        assertNull(m.column(Role.DATE));assertEquals("금액",m.column(Role.AMOUNT)?.header)
+    }
 }
