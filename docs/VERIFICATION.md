@@ -62,6 +62,10 @@ APK SHA-256:
 96df253c7d8bc65867f312c8c3fe404d0a5bb93331a9441044b173cc1719ee4d
 ```
 
+## 초기 GitHub 검사 실패 수정
+
+최초 실행은 `android-actions/setup-android@v3`의 기본 패키지 `tools`를 설치하려다 `Failed to find package 'tools'`로 중단되었습니다. 앱 컴파일·테스트 이전의 SDK 준비 오류입니다. CI에서 `platform-tools`, `platforms;android-35`, `build-tools;35.0.0`만 설치하도록 명시했습니다. 후속 검사의 최종 결과는 해당 커밋의 Actions 실행에서 확인합니다.
+
 ## 남은 확인
 
 Google Cloud 프로젝트에서 Sheets API와 Android OAuth 클라이언트를 설정한 후, 원본의 복사본으로 로그인·조회·매핑·ID 설정·추가·수정·삭제·다른 기기와의 충돌을 확인해야 합니다. 현재 제공 파일은 초기 preview 빌드입니다. 생체 인증, 가족 공통 매핑 저장, 강한 동시성 보장 등의 후속 범위는 README의 제한 사항에 기재했습니다.
