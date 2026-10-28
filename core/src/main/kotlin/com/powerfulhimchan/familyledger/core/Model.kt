@@ -70,9 +70,10 @@ data class TableMapping(
     val numberStyle: NumberStyle = NumberStyle.DOT_DECIMAL,
     val expenseValues: Set<String> = setOf("지출", "출금", "expense", "debit"),
     val incomeValues: Set<String> = setOf("수입", "입금", "income", "credit"),
-    val bookTitle: String = ""
+    val bookTitle: String = "",
+    val plan: PlanMapping? = null
 ) {
-    val key get() = "$spreadsheetId:$sheetId:$headerRow:$firstColumn:$endColumn"
+    val key get() = if (plan != null) "$spreadsheetId:$sheetId:plan" else "$spreadsheetId:$sheetId:$headerRow:$firstColumn:$endColumn"
     val displayName get() = if(bookTitle.isBlank()) title else "$bookTitle · $title"
     fun column(role: Role) = columns.firstOrNull { it.role == role }
     /** Move a unique analysis role without removing the underlying input columns or values. */
@@ -91,6 +92,7 @@ data class TableMapping(
         })
     }
     fun validate(): List<String> = buildList {
+        if (plan != null) { addAll(plan.validate()); return@buildList }
         if (firstColumn < 0 || endColumn <= firstColumn || headerRow < 0 || dataEndRow <= headerRow + 1) add("표 범위를 확인해 주세요.")
         if (month != null && month !in 1..12) add("월은 1~12 사이여야 합니다.")
         if (year !in 1900..9999) add("연도를 확인해 주세요.")

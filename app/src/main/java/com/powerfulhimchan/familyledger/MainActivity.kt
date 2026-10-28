@@ -48,12 +48,12 @@ import java.time.LocalTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
-private val Ink=Color(0xFF0B1220)
-private val Blue=Color(0xFF2563EB)
-private val Muted=Color(0xFF64748B)
-private val Background=Color(0xFFEEF2F9)
-private val Line=Color(0xFFCFD8E6)
-private fun money(n: BigDecimal?) = n?.let { DecimalFormat("#,##0.##").format(it) } ?: "—"
+internal val Ink=Color(0xFF0B1220)
+internal val Blue=Color(0xFF2563EB)
+internal val Muted=Color(0xFF64748B)
+internal val Background=Color(0xFFEEF2F9)
+internal val Line=Color(0xFFCFD8E6)
+internal fun money(n: BigDecimal?) = n?.let { DecimalFormat("#,##0.##").format(it) } ?: "—"
 private fun roleName(r: Role)=r.label
 private fun typeName(t: FieldType)=when(t) { FieldType.TEXT->"문자";FieldType.INTEGER->"정수";FieldType.DECIMAL->"소수";FieldType.CURRENCY->"통화";FieldType.PERCENT->"퍼센트";FieldType.DATE->"날짜";FieldType.TIME->"시간";FieldType.DATETIME->"날짜+시간";FieldType.BOOLEAN->"체크박스";FieldType.ENUM->"선택 목록";FieldType.PHONE->"전화번호";FieldType.EMAIL->"이메일";FieldType.URL->"URL" }
 
@@ -68,11 +68,11 @@ class MainActivity: ComponentActivity() {
     }
 }
 
-@Composable private fun Panel(modifier: Modifier=Modifier,content: @Composable ColumnScope.()->Unit) {
+@Composable internal fun Panel(modifier: Modifier=Modifier,content: @Composable ColumnScope.()->Unit) {
     Surface(modifier.fillMaxWidth(),color=Color.White,shape=RoundedCornerShape(0.dp)) { Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp),content=content) }
 }
-@Composable private fun Heading(title: String,detail: String?=null) { Text(title,fontSize=22.sp,fontWeight=FontWeight.Bold);if(detail!=null) Text(detail,color=Muted,fontSize=13.sp) }
-@Composable private fun <T> Choice(label: String,value: T,options: List<T>,name: (T)->String,onChange: (T)->Unit,modifier: Modifier=Modifier) {
+@Composable internal fun Heading(title: String,detail: String?=null) { Text(title,fontSize=22.sp,fontWeight=FontWeight.Bold);if(detail!=null) Text(detail,color=Muted,fontSize=13.sp) }
+@Composable internal fun <T> Choice(label: String,value: T,options: List<T>,name: (T)->String,onChange: (T)->Unit,modifier: Modifier=Modifier) {
     var expanded by remember { mutableStateOf(false) }
     Column(modifier) {
         Text(label,color=Muted,fontSize=12.sp)
@@ -116,14 +116,14 @@ private data class Editor(val record: Record?,val copy: Boolean=false)
             if(m!=null) IconButton(onClick={online { vm.refresh() }},enabled=!state.busy) { Icon(Icons.Outlined.Refresh,"새로고침") }
             IconButton(onClick={connect=true},enabled=!state.busy) { Icon(Icons.Outlined.AddLink,"장부 연결") }
         },colors=TopAppBarDefaults.topAppBarColors(containerColor=Background))
-    },bottomBar={if(m!=null) NavigationBar(containerColor=Color.White) { listOf("홈","거래","분석","설정").forEachIndexed { i,label -> NavigationBarItem(selected=tab==i,onClick={tab=i},icon={Icon(listOf(Icons.Outlined.Home,Icons.Outlined.ReceiptLong,Icons.Outlined.BarChart,Icons.Outlined.Settings)[i],label)},label={Text(label)}) } }},
-        floatingActionButton={if(m!=null && tab in 0..1) ExtendedFloatingActionButton(onClick={if(m.column(Role.ID)==null || m.column(Role.DELETED)==null) confirmIdentity=true else editor=Editor(null)},icon={Icon(Icons.Outlined.Add,null)},text={Text("거래 추가")},shape=RoundedCornerShape(999.dp),containerColor=Blue,contentColor=Color.White)}) { padding ->
+    },bottomBar={if(m!=null) NavigationBar(containerColor=Color.White) { (if(m.plan!=null) listOf("홈","항목","일정","설정") else listOf("홈","거래","분석","설정")).forEachIndexed { i,label -> NavigationBarItem(selected=tab==i,onClick={tab=i},icon={Icon(listOf(Icons.Outlined.Home,Icons.Outlined.ReceiptLong,if(m.plan!=null) Icons.Outlined.CalendarMonth else Icons.Outlined.BarChart,Icons.Outlined.Settings)[i],label)},label={Text(label)}) } }},
+        floatingActionButton={if(m!=null && m.plan==null && tab in 0..1) ExtendedFloatingActionButton(onClick={if(m.column(Role.ID)==null || m.column(Role.DELETED)==null) confirmIdentity=true else editor=Editor(null)},icon={Icon(Icons.Outlined.Add,null)},text={Text("거래 추가")},shape=RoundedCornerShape(999.dp),containerColor=Blue,contentColor=Color.White)}) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             if(state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if(m==null) Landing(state,vm,{connect=true}) else {
                 if(m.spreadsheetId=="demo") Text("샘플 모드 · 실제 스프레드시트에는 저장되지 않습니다",Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp),color=Blue,fontSize=12.sp)
                 else if(state.cached) Text("저장된 데이터 · 새로고침하면 최신 내용을 불러옵니다",Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp),color=Muted,fontSize=12.sp)
-                when(tab) {
+                if(m.plan!=null) PlanContent(state,vm,tab,{mappingEdit=true},{confirmClear=true}) else when(tab) {
                     0 -> LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(16.dp,8.dp,16.dp,100.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                         item { MonthSelector(month,::changeMonth) }
                         if(!analysisReady) item { MappingNotice { mappingEdit=true } }
@@ -162,7 +162,7 @@ private data class Editor(val record: Record?,val copy: Boolean=false)
         if(vm.configureRelay(endpoint,key)) { connect=false;vm.connect(url) }
     }
     if(state.book!=null && state.setupGrid==null) AlertDialog(onDismissRequest={if(!state.busy) vm.cancelSetup()},title={Text(state.book!!.title)},text={Column(Modifier.verticalScroll(rememberScrollState())) { Text("연결할 탭을 선택해 주세요.");state.book!!.sheets.forEach { sheet -> TextButton(onClick={vm.chooseSheet(sheet)},enabled=!state.busy) { Text(sheet.title) } } }},confirmButton={},dismissButton={TextButton(onClick={vm.cancelSetup()},enabled=!state.busy){Text("취소")}})
-    if(state.setupGrid!=null || (mappingEdit && m!=null && state.grid!=null)) MappingDialog(state.setupGrid ?: state.grid!!,if(state.setupGrid==null || state.setupGrid?.let { m!=null && it.sheetId==m.sheetId && it.spreadsheetId==m.spreadsheetId }==true) m else null,state.busy,{mappingEdit=false;vm.cancelSetup()},{vm.saveMapping(it)})
+    if(state.setupGrid!=null || (mappingEdit && m!=null && state.grid!=null)) ImportDialog(state.setupGrid ?: state.grid!!,if(state.setupGrid==null || state.setupGrid?.let { m!=null && it.sheetId==m.sheetId && it.spreadsheetId==m.spreadsheetId }==true) m else null,state.busy,{mappingEdit=false;vm.cancelSetup()},{vm.saveMapping(it)})
     if(editor!=null && m!=null) {
         val editing=editor!!
         EditorDialog(m,editing,state.parsed.records,state.busy,{editor=null},onSave={values -> online { vm.save(if(editing.copy) null else editing.record,values) }},onDelete={online { vm.save(editing.record,emptyMap(),true) }})
@@ -172,7 +172,7 @@ private data class Editor(val record: Record?,val copy: Boolean=false)
     if(confirmMonthly) AlertDialog(onDismissRequest={confirmMonthly=false},title={Text("월별 탭을 함께 연결할까요?")},text={Text("같은 스프레드시트에서 헤더가 일치하는 월별 탭을 읽고 현재 표의 매핑을 적용합니다. 시트에는 쓰지 않습니다. 연결 후 각 탭의 입력 범위를 확인해 주세요.")},confirmButton={TextButton(onClick={confirmMonthly=false;online { vm.linkMonthlyTabs() }},enabled=!state.busy){Text("함께 연결")}},dismissButton={TextButton(onClick={confirmMonthly=false}){Text("취소")}})
 }
 
-@Composable private fun MappingDialog(g: Grid,existing: TableMapping?,busy: Boolean,onDismiss: ()->Unit,onSave: (TableMapping)->Unit) {
+@Composable internal fun MappingDialog(g: Grid,existing: TableMapping?,busy: Boolean,onDismiss: ()->Unit,onSave: (TableMapping)->Unit,onPlan: ()->Unit) {
     val suggestions=remember(g) { Detection.candidates(g,LocalDate.now().year) }
     val rebound=existing?.let { old ->
         if(runCatching { Writes.verifyStructure(g,old) }.isSuccess) old else {
@@ -205,6 +205,7 @@ private data class Editor(val record: Record?,val copy: Boolean=false)
                 Row(Modifier.fillMaxWidth().padding(16.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) { Text("표 연결 설정",fontSize=22.sp,fontWeight=FontWeight.Bold);TextButton(onClick=onDismiss,enabled=!busy){Text("닫기")} }
                 LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                     item { Panel { Text(g.title,fontWeight=FontWeight.Bold);Text("사용할 표와 입력 영역을 확인해 주세요. 수식은 자동으로 보호됩니다.",fontSize=13.sp,color=Muted)
+                        TextButton(onClick=onPlan,enabled=!busy) { Text("월 수입·고정비·이체 일정으로 불러오기") }
                         val ambiguous=mapping.columns.filter { Detection.role(it.header)!=Role.NONE }.groupBy { Detection.role(it.header) }
                             .filter { (role,candidates) -> candidates.size>1 && mapping.column(role)==null }
                         ambiguous.forEach { (role,candidates) ->
@@ -373,7 +374,7 @@ private object GroupedNumber: VisualTransformation {
     LazyColumn(contentPadding=PaddingValues(24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
         item { Spacer(Modifier.height(24.dp));Icon(Icons.Outlined.TableChart,null,tint=Blue,modifier=Modifier.size(48.dp));Spacer(Modifier.height(20.dp));Text("시트는 그대로,\n장부는 더 편하게.",fontSize=32.sp,lineHeight=42.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.height(12.dp));Text("구글 스프레드시트를 연결하고\n우리 집에 맞는 입력 화면과 분석을 만나보세요.",color=Muted,lineHeight=24.sp) }
         item { Button(onClick=onConnect,Modifier.fillMaxWidth().height(52.dp),enabled=!state.busy,shape=RoundedCornerShape(999.dp)) { Text("스프레드시트 연결") } }
-        item { Panel { Text("먼저 살펴보기",fontWeight=FontWeight.Bold);Text("실제 계정 연결 없이 세 가지 장부 구조를 체험합니다.",color=Muted,fontSize=13.sp);listOf("월별 탭 장부","일반 수입·지출 장부","영문 장부").forEachIndexed { i,label -> OutlinedButton(onClick={vm.demo(i)},Modifier.fillMaxWidth(),enabled=!state.busy,shape=RoundedCornerShape(999.dp)) { Text(label) } } } }
+        item { Panel { Text("먼저 살펴보기",fontWeight=FontWeight.Bold);Text("실제 계정 연결 없이 다양한 장부 구조를 체험합니다.",color=Muted,fontSize=13.sp);listOf("월별 탭 장부","일반 수입·지출 장부","영문 장부","월 수입·고정비·이체 일정").forEachIndexed { i,label -> OutlinedButton(onClick={vm.demo(i)},Modifier.fillMaxWidth(),enabled=!state.busy,shape=RoundedCornerShape(999.dp)) { Text(label) } } } }
         if(state.connections.isNotEmpty()) item { Panel { Text("저장한 장부",fontWeight=FontWeight.Bold);state.connections.forEach { m -> TextButton(onClick={vm.openConnection(m)},enabled=!state.busy) { Text(m.displayName) } } } }
     }
 }
@@ -408,7 +409,7 @@ private object GroupedNumber: VisualTransformation {
             .onFailure { validationError=it.message }
     },enabled=A1.spreadsheetId(url)!=null && endpoint.isNotBlank() && key.length>=32 && !busy){Text("연결하고 불러오기")}},dismissButton={TextButton(onClick=onDismiss){Text("취소")}})
 }
-@Composable private fun MonthSelector(month: YearMonth,onChange: (YearMonth)->Unit) {
+@Composable internal fun MonthSelector(month: YearMonth,onChange: (YearMonth)->Unit) {
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
         IconButton(onClick={onChange(month.minusMonths(1))}){Icon(Icons.Outlined.ChevronLeft,"이전 달")}
         Text("${month.year}년 ${month.monthValue}월",fontSize=20.sp,fontWeight=FontWeight.Bold)

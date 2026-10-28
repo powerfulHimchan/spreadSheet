@@ -11,6 +11,14 @@ object Codec {
         put("firstColumn",m.firstColumn);put("endColumn",m.endColumn);put("dataEndRow",m.dataEndRow);put("year",m.year)
         put("month",m.month ?: JSONObject.NULL);put("numberStyle",m.numberStyle.name)
         put("incomeValues",JSONArray(m.incomeValues.toList()));put("expenseValues",JSONArray(m.expenseValues.toList()))
+        m.plan?.let { plan -> put("plan",JSONObject().apply {
+            put("numberStyle",plan.numberStyle.name)
+            put("regions",JSONArray(plan.regions.map { r -> JSONObject().apply {
+                put("id",r.id);put("name",r.name);put("kind",r.kind.name);put("firstRow",r.firstRow);put("endRow",r.endRow)
+                put("fields",JSONObject(r.fields.mapKeys { it.key.name }));put("carryTitle",r.carryTitle)
+                put("anchors",JSONObject(r.anchors));put("excludedRows",JSONArray(r.excludedRows.toList()))
+            } }))
+        }) }
         put("columns",JSONArray(m.columns.map { c -> JSONObject().apply {
             put("key",c.key);put("header",c.header);put("index",c.index);put("type",c.type.name);put("role",c.role.name)
             put("readOnly",c.readOnly);put("options",JSONArray(c.options));put("labels",JSONObject(c.labels))
@@ -24,7 +32,14 @@ object Codec {
             (0 until cols.length()).map { i -> val c=cols.getJSONObject(i);val labels=c.optJSONObject("labels") ?: JSONObject()
                 Column(c.getString("key"),c.getString("header"),c.getInt("index"),FieldType.valueOf(c.getString("type")),Role.valueOf(c.getString("role")),c.optBoolean("readOnly"),strings(c.optJSONArray("options")),
                     labels.keys().asSequence().associateWith { labels.getString(it) },c.optBoolean("strictOptions"),c.optBoolean("required"),if(c.isNull("validationRange")) null else c.getString("validationRange"),DateMode.valueOf(c.optString("dateMode","FULL_DATE")),c.optBoolean("enumNumeric"))
-            },o.getInt("year"),if(o.isNull("month")) null else o.getInt("month"),NumberStyle.valueOf(o.optString("numberStyle","DOT_DECIMAL")),strings(o.optJSONArray("expenseValues")).toSet(),strings(o.optJSONArray("incomeValues")).toSet(),o.optString("bookTitle"))
+            },o.getInt("year"),if(o.isNull("month")) null else o.getInt("month"),NumberStyle.valueOf(o.optString("numberStyle","DOT_DECIMAL")),strings(o.optJSONArray("expenseValues")).toSet(),strings(o.optJSONArray("incomeValues")).toSet(),o.optString("bookTitle"),o.optJSONObject("plan")?.let { plan ->
+                val regions=plan.getJSONArray("regions")
+                PlanMapping((0 until regions.length()).map { i -> val r=regions.getJSONObject(i);val fields=r.getJSONObject("fields");val anchors=r.optJSONObject("anchors") ?: JSONObject();val excluded=r.optJSONArray("excludedRows")
+                    PlanRegion(r.getString("id"),r.getString("name"),PlanKind.valueOf(r.getString("kind")),r.getInt("firstRow"),r.getInt("endRow"),
+                        fields.keys().asSequence().associate { PlanField.valueOf(it) to fields.getInt(it) },r.optBoolean("carryTitle"),
+                        anchors.keys().asSequence().associateWith { anchors.getString(it) },if(excluded==null) emptySet() else (0 until excluded.length()).map { excluded.getInt(it) }.toSet())
+                },NumberStyle.valueOf(plan.optString("numberStyle","DOT_DECIMAL")))
+            })
     }
     fun cell(c: Cell): JSONObject = JSONObject().apply {
         put("value",c.value);put("kind",c.kind.name);put("format",c.format);put("pattern",c.pattern)
