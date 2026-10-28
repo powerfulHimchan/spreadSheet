@@ -20,6 +20,7 @@ data class AppState(
     val parsed: ParsedTable = ParsedTable(emptyList(),emptyList()),
     val history: List<Record> = emptyList(),
     val historyTables: Int = 1,
+    val plan: ParsedPlan = ParsedPlan(),
     val book: BookInfo? = null,
     val setupGrid: Grid? = null,
     val busy: Boolean = false,
@@ -56,6 +57,7 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
     }
     private suspend fun show(g: Grid,m: TableMapping,cached: Boolean = false,updated: Long? = null) {
         val parsed=withContext(Dispatchers.Default) { Ledger.parse(g,m) }
+        val plan=withContext(Dispatchers.Default) { m.plan?.let { Plans.parse(g,it) } ?: ParsedPlan() }
         val history=mutableListOf<Record>();val seen=mutableSetOf<String>();var count=0
         fun add(source: TableMapping,table: ParsedTable) {
             count++
@@ -64,11 +66,11 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
         add(m,parsed)
         if(g.spreadsheetId!="demo") for(connection in dao.connections()) {
             val other=Codec.mapping(connection.payload)
-            if(other.spreadsheetId==m.spreadsheetId && other.key!=m.key) dao.snapshot(other.key)?.let { snapshot ->
+            if(other.plan==null && m.plan==null && other.spreadsheetId==m.spreadsheetId && other.key!=m.key) dao.snapshot(other.key)?.let { snapshot ->
                 val table=withContext(Dispatchers.Default) { Ledger.parse(Codec.grid(snapshot.payload),other) };add(other,table)
             }
         }
-        mutable.update { it.copy(grid=g,mapping=m,parsed=parsed,history=history,historyTables=count,cached=cached,updated=updated,revision=it.revision+1,setupGrid=null,book=null) }
+        mutable.update { it.copy(grid=g,mapping=m,parsed=parsed,plan=plan,history=history,historyTables=count,cached=cached,updated=updated,revision=it.revision+1,setupGrid=null,book=null) }
     }
     private suspend fun persist(g: Grid,m: TableMapping) {
         val now=System.currentTimeMillis()
@@ -90,6 +92,7 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
     }
     fun cancelSetup() { mutable.update { it.copy(book=null,setupGrid=null) } }
     fun demo(index: Int = 0) = runTask {
+        if(index==3) { val g=Demo.planGrid();show(g,Plans.connection(g,PlanDetection.suggest(g)));return@runTask }
         val g=Demo.grids()[index];val m=Detection.candidates(g,LocalDate.now().year).first()
         val pair=Demo.withIdentity(g,m)
         show(pair.first,pair.second)
@@ -98,6 +101,11 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
         val errors=m.validate();check(errors.isEmpty()) { errors.joinToString("\n") }
         val g=mutable.value.setupGrid ?: mutable.value.grid ?: return@runTask
         val named=m.copy(bookTitle=mutable.value.book?.takeIf { it.id==m.spreadsheetId }?.title ?: m.bookTitle)
+        if(named.plan!=null) Plans.verifyStructure(g,named.plan)
+        val previous=mutable.value.mapping
+        if(previous!=null && previous.spreadsheetId==named.spreadsheetId && previous.sheetId==named.sheetId && (previous.plan==null)!=(named.plan==null) && previous.spreadsheetId!="demo") {
+            dao.removeConnection(previous.key);dao.removeSnapshot(previous.key)
+        }
         if(g.spreadsheetId=="demo") show(g,named) else persist(g,named)
     }
     fun openConnection(m: TableMapping) = runTask {
@@ -111,6 +119,7 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
     }
     fun linkMonthlyTabs() = runTask {
         val s=mutable.value;val original=s.mapping ?: return@runTask
+        check(original.plan==null) { "월 계획은 영역 설정에서 관리해 주세요." }
         check(original.spreadsheetId!="demo") { "실제 장부에서 사용할 수 있습니다." }
         val book=api.book(original.spreadsheetId)
         val mainKeys=original.columns.filter { it.role !in setOf(Role.ID,Role.DELETED) }.map { it.key }.toSet()
@@ -160,6 +169,7 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
     }
     fun installIdentity() = runTask {
         val m=mutable.value.mapping ?: return@runTask
+        check(m.plan==null) { "월 계획을 불러올 때 원본에 식별 열을 추가하지 않습니다." }
         check(m.spreadsheetId!="demo")
         val grid=fresh(m);val updated=api.installIdentity(grid,m)
         // Persist the mapping immediately, so a failed follow-up read can recover without reinstalling IDs.

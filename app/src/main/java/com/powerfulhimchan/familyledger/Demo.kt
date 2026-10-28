@@ -7,6 +7,20 @@ import java.time.YearMonth
 object Demo {
     private fun t(v: String)=Cell(v,ValueKind.STRING)
     private fun n(v: String)=Cell(v,ValueKind.NUMBER)
+    fun planGrid(): Grid {
+        val rows=MutableList(12) { MutableList(14) { Cell() } }
+        fun put(r: Int,c: Int,value: String,numeric: Boolean=false) { rows[r][c]=if(numeric) n(value) else t(value) }
+        put(0,7,"금액");put(0,8,"이체은행");put(0,9,"이체일");put(0,10,"만기일")
+        put(1,1,"월 수입");put(1,2,"금액");put(1,3,"월 지출");put(1,4,"금액")
+        put(2,1,"급여 A");put(2,2,"3500000",true);put(3,1,"급여 B");put(3,2,"2500000",true)
+        listOf(Triple("주거비","1200000","공동"),Triple("통신비","65000","가족 A"),Triple("생활비","800000","공동"),Triple("구독 서비스","15000","가족 B"),Triple("운동","0","가족 A")).forEachIndexed { i,(label,amount,party) -> put(i+2,3,label);put(i+2,4,amount,true);put(i+2,5,party) }
+        put(6,6,"잠시 보류");put(2,9,"25일")
+        put(8,3,"기념일 적립");put(8,4,"200000",true);put(8,7,"100000",true);put(8,8,"가족은행");put(8,9,"5일");put(8,10,"2028.12.31");put(8,11,"생일")
+        put(9,7,"100000",true);put(9,8,"가족은행");put(9,9,"17일");put(9,11,"가족 기념일")
+        put(11,3,"합계");rows[11][4]=Cell("2280000",ValueKind.NUMBER,formula="=SUM(E3:E11)")
+        put(1,11,"가족카드 결제일");put(1,12,"25일");put(1,13,"가족은행")
+        return Grid("demo",4,"월 계획 샘플",rows,12,14)
+    }
     fun grids(): List<Grid> {
         val month=YearMonth.from(LocalDate.now())
         val date=month.atDay(1)

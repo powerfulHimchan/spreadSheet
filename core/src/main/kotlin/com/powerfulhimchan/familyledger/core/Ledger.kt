@@ -5,6 +5,7 @@ import java.time.YearMonth
 
 object Ledger {
     fun parse(grid: Grid, mapping: TableMapping): ParsedTable {
+        if (mapping.plan != null) return ParsedTable(emptyList(),emptyList())
         val issues = mutableListOf<ParseIssue>()
         val records = mutableListOf<Record>()
         for (row in mapping.headerRow + 1 until minOf(mapping.dataEndRow, grid.rows.size)) {
@@ -61,6 +62,7 @@ object Writes {
     fun verifyStructure(grid: Grid, mapping: TableMapping) {
         check(grid.complete) { "시트 일부만 읽혀 저장할 수 없습니다. 표 범위를 줄여 다시 연결해 주세요." }
         check(grid.sheetId == mapping.sheetId && grid.spreadsheetId == mapping.spreadsheetId) { "장부가 변경되었습니다." }
+        mapping.plan?.let { Plans.verifyStructure(grid,it); return }
         check(mapping.validate().isEmpty()) { mapping.validate().joinToString("\n") }
         check(mapping.columns.map { it.header }.distinct().size==mapping.columns.size) { "중복된 헤더가 있습니다. 안전한 저장을 위해 시트의 열 이름을 고유하게 지정해 주세요." }
         mapping.columns.filter { it.role !in setOf(Role.ID,Role.DELETED) }.forEach { col ->
@@ -72,6 +74,7 @@ object Writes {
         }
     }
     fun edit(grid: Grid, mapping: TableMapping, original: Record, input: Map<String,String>, delete: Boolean = false): WritePlan {
+        check(mapping.plan == null) { "월 계획은 원본 시트에서 수정한 뒤 새로고침해 주세요." }
         verifyStructure(grid,mapping)
         val idCol = mapping.column(Role.ID) ?: error("안전한 편집 설정을 먼저 완료해 주세요.")
         val id = original.id ?: error("거래 ID가 없습니다. 새로고침 후 다시 확인해 주세요.")
@@ -93,6 +96,7 @@ object Writes {
         return WritePlan(cells,id)
     }
     fun add(grid: Grid, mapping: TableMapping, input: Map<String,String>, id: String = java.util.UUID.randomUUID().toString()): WritePlan {
+        check(mapping.plan == null) { "월 계획은 원본 시트에서 수정한 뒤 새로고침해 주세요." }
         verifyStructure(grid,mapping)
         val idCol = mapping.column(Role.ID) ?: error("안전한 편집 설정을 먼저 완료해 주세요.")
         val deleted = mapping.column(Role.DELETED) ?: error("삭제 상태 열이 필요합니다.")
