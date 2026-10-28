@@ -53,6 +53,7 @@ import java.time.YearMonth
                     item { Panel {
                         Heading(g.title,"수입·지출·이체 영역을 각각 선택해 주세요. 원본 값과 수식은 그대로 읽습니다.")
                         Text("매월 반복되는 금액을 관리하는 방식입니다. 실제 거래일을 지정할 필요가 없습니다.",color=Muted,fontSize=13.sp)
+                        if(!g.complete) Text("시트 일부만 읽었습니다. 표시되는 합계도 불러온 범위 기준입니다.",color=MaterialTheme.colorScheme.error,fontSize=13.sp)
                         TextButton(onClick=onTransactions,enabled=!busy) { Text("날짜별 거래 목록으로 불러오기") }
                         if(regions.isEmpty()) Text("자동으로 찾은 영역이 없습니다. 아래에서 영역을 추가해 항목명과 금액 열을 선택해 주세요.",color=Blue)
                     } }
@@ -110,6 +111,7 @@ import java.time.YearMonth
                         parsed.items.take(if(allPreview) 160 else 4).forEach { item ->
                             Text("${item.kind.label} · ${item.title} · ${money(item.amount)}",fontSize=13.sp)
                         }
+                        if(allPreview && parsed.items.size>160) Text("미리보기는 앞 160개를 표시합니다. 전체 항목은 연결 후 확인할 수 있습니다.",fontSize=12.sp,color=Muted)
                         TextButton(onClick={allPreview=!allPreview}) { Text(if(allPreview) "미리보기 접기" else "항목 더 보기") }
                         parsed.issues.take(12).forEach { Text("${it.row}행 · ${it.column}: ${it.message}",fontSize=12.sp,color=MaterialTheme.colorScheme.error) }
                         if(parsed.issues.size>12) Text("그 외 ${parsed.issues.size-12}건은 연결 후 설정에서 확인할 수 있습니다.",fontSize=12.sp,color=Muted)
@@ -150,6 +152,7 @@ import java.time.YearMonth
         when(tab) {
             0 -> {
                 item { Panel { Heading("월 수입·고정비");PlanSummary(parsed) } }
+                if(state.grid?.complete==false) item { Panel { Text("시트 일부만 읽었습니다. 합계는 불러온 범위 기준입니다.",color=MaterialTheme.colorScheme.error) } }
                 if(parsed.issues.isNotEmpty()) item { Panel { Text("확인할 데이터 ${parsed.issues.size}건",fontWeight=FontWeight.Bold);TextButton(onClick=onConfigure) { Text("영역 설정과 미리보기 확인") } } }
                 item { Panel {
                     Heading("담당·결제정보별 월 지출")
@@ -183,7 +186,7 @@ import java.time.YearMonth
             }
             2 -> {
                 item { MonthSelector(month,{month=it}) }
-                item { Text("매월 반복 일정 · 29~31일이 없는 달은 말일로 표시합니다. 실제 출금일은 은행 기준으로 확인해 주세요.",color=Muted,fontSize=12.sp) }
+                item { Text("매월 반복 일정 · 29~31일이 없는 달은 말일로 표시합니다. 보류 항목과 연결된 이체는 일정에서 제외합니다.",color=Muted,fontSize=12.sp) }
                 val schedule=Plans.scheduleItems(parsed).sortedBy { it.scheduledDate(month) }
                 items(schedule,key={"schedule:${it.key}"}) { item ->
                     Panel { Text("${item.scheduledDate(month)} · ${item.kind.label}",color=Blue,fontSize=13.sp);PlanItemRow(item,{detail=item}) }
@@ -236,7 +239,7 @@ import java.time.YearMonth
             Text("${field.label}: ${cell.value}")
             Text("${A1.col(region.fields.getValue(field))}${item.sourceRow+1}"+if(cell.formula!=null) " · 계산식" else "",color=Muted,fontSize=12.sp)
         } }
-        if(item.parentRow!=null) Text("${item.parentRow+1}행 항목의 세부내역으로 읽었습니다.",color=Muted,fontSize=12.sp)
+        item.parentRow?.let { Text("${it+1}행 항목의 세부내역으로 읽었습니다.",color=Muted,fontSize=12.sp) }
         if(related.isNotEmpty()) { Text("같은 행에 연결된 정보",fontWeight=FontWeight.Bold);related.forEach { r -> Text("${r.kind.label} · ${r.note.ifBlank { r.title }} · ${money(r.amount)} · ${r.bank}",fontSize=13.sp) };Text("원본 행 위치로 연결한 정보입니다. 실제 관계는 영역 설정에서 확인할 수 있습니다.",fontSize=12.sp,color=Muted) }
     }},confirmButton={TextButton(onClick=onDismiss) { Text("닫기") }},dismissButton={if(mapping.spreadsheetId!="demo") TextButton(onClick={
         val col=region.fields[PlanField.TITLE] ?: region.fields.values.first()

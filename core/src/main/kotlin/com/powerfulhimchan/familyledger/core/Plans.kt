@@ -126,7 +126,10 @@ object Plans {
 
     fun scheduleItems(plan: ParsedPlan): List<PlanItem> {
         val transfers=plan.items.filter { it.kind==PlanKind.TRANSFER && it.day!=null }
-        return plan.items.filter { item -> item.day!=null && !item.paused && (item.kind!=PlanKind.EXPENSE || transfers.none { it.sourceRow==item.sourceRow || it.parentRow==item.sourceRow }) }
+        val pausedExpenses=plan.items.filter { it.kind==PlanKind.EXPENSE && it.paused }.map { it.sourceRow }.toSet()
+        return plan.items.filter { item -> item.day!=null && !item.paused &&
+            (item.kind!=PlanKind.TRANSFER || (item.parentRow ?: item.sourceRow) !in pausedExpenses) &&
+            (item.kind!=PlanKind.EXPENSE || transfers.none { it.sourceRow==item.sourceRow || it.parentRow==item.sourceRow }) }
     }
 
     fun verifyStructure(grid: Grid, plan: PlanMapping) {

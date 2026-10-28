@@ -101,7 +101,7 @@ class LedgerViewModel(app: Application): AndroidViewModel(app) {
         val errors=m.validate();check(errors.isEmpty()) { errors.joinToString("\n") }
         val g=mutable.value.setupGrid ?: mutable.value.grid ?: return@runTask
         val named=m.copy(bookTitle=mutable.value.book?.takeIf { it.id==m.spreadsheetId }?.title ?: m.bookTitle)
-        if(named.plan!=null) Plans.verifyStructure(g,named.plan)
+        named.plan?.let { Plans.verifyStructure(g,it) }
         val previous=mutable.value.mapping
         if(previous!=null && previous.spreadsheetId==named.spreadsheetId && previous.sheetId==named.sheetId && (previous.plan==null)!=(named.plan==null) && previous.spreadsheetId!="demo") {
             dao.removeConnection(previous.key);dao.removeSnapshot(previous.key)

@@ -69,6 +69,13 @@ class PlansTest {
         assertNull(parsed.items.single { it.title=="보험" }.amount)
         assertTrue(parsed.issues.any { it.row==3 && it.column.contains("금액") })
     }
+    @Test fun aPausedParentDoesNotCreateUpcomingTransfers() {
+        val g=sample();val rows=g.rows.map { it.toMutableList() };rows[8][7]=Cell("일시 중지")
+        val next=g.copy(rows=rows);val parsed=Plans.parse(next,PlanDetection.suggest(next))
+        assertTrue(parsed.items.any { it.kind==PlanKind.TRANSFER })
+        assertTrue(Plans.scheduleItems(parsed).none { it.kind==PlanKind.TRANSFER })
+        assertEquals(BigDecimal("1365"),parsed.expense)
+    }
     @Test fun manualMappingsSupportDifferentNamesAndReorderedColumns() {
         val g=Grid("x",1,"Custom",listOf(listOf(Cell("Amount"),Cell("Label")),listOf(Cell("1.234,50"),Cell("Rent"))))
         val plan=PlanMapping(listOf(PlanRegion("custom","Bills",PlanKind.EXPENSE,1,2,mapOf(PlanField.AMOUNT to 0,PlanField.TITLE to 1))),NumberStyle.COMMA_DECIMAL)
