@@ -55,6 +55,7 @@ import java.time.YearMonth
                         Text("매월 반복되는 금액을 관리하는 방식입니다. 실제 거래일을 지정할 필요가 없습니다.",color=Muted,fontSize=13.sp)
                         if(!g.complete) Text("시트 일부만 읽었습니다. 표시되는 합계도 불러온 범위 기준입니다.",color=MaterialTheme.colorScheme.error,fontSize=13.sp)
                         TextButton(onClick=onTransactions,enabled=!busy) { Text("날짜별 거래 목록으로 불러오기") }
+                        if(suggested.regions.isNotEmpty()) TextButton(onClick={regions=suggested.regions;selected=regions.map { it.id }.toSet();error=null},enabled=!busy) { Text("영역 자동 추천 다시 적용") }
                         if(regions.isEmpty()) Text("자동으로 찾은 영역이 없습니다. 아래에서 영역을 추가해 항목명과 금액 열을 선택해 주세요.",color=Blue)
                     } }
                     items(regions,key={it.id}) { region ->
@@ -231,8 +232,7 @@ import java.time.YearMonth
     val context=LocalContext.current
     val mapping=state.mapping ?: return
     val region=mapping.plan?.regions?.firstOrNull { it.id==item.regionId } ?: return
-    val related=state.plan.items.filter { it.key!=item.key && ((item.kind==PlanKind.EXPENSE && it.kind==PlanKind.TRANSFER && (it.sourceRow==item.sourceRow || it.parentRow==item.sourceRow)) ||
-        (item.kind==PlanKind.TRANSFER && it.kind==PlanKind.EXPENSE && it.sourceRow==(item.parentRow ?: item.sourceRow))) }
+    val related=state.plan.items.filter { it.key!=item.key && (Plans.relatedExpense(it,item) || Plans.relatedExpense(item,it)) }
     AlertDialog(onDismissRequest=onDismiss,title={Text(item.title)},text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         Text(item.kind.label,color=Blue)
         item.cells.forEach { (field,cell) -> if(!cell.blank) {

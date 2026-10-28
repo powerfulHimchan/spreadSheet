@@ -43,7 +43,7 @@ data class PlanItem(
     val regionId: String, val sourceRow: Int, val kind: PlanKind, val title: String,
     val amount: BigDecimal?, val party: String, val note: String, val bank: String,
     val day: Int?, val maturity: LocalDate?, val cells: Map<PlanField, Cell>,
-    val parentRow: Int? = null
+    val parentRow: Int? = null, val titleColumn: Int? = null
 ) {
     val key get() = "$regionId:$sourceRow"
     val paused get() = Regex("보류|중지|중단|일시정지|paused?",RegexOption.IGNORE_CASE).containsMatchIn(note)
@@ -116,7 +116,7 @@ object Plans {
                 val noteCell=cell(PlanField.NOTE)
                 val note=if(summaryFormula(noteCell,region.fields[PlanField.AMOUNT],row+1)) "" else text(PlanField.NOTE)
                 items+=PlanItem(region.id,row,region.kind,resolvedTitle,amount,text(PlanField.PARTY),note,text(PlanField.BANK),day,maturity,cells,
-                    parentRow.takeIf { region.carryTitle && title.isBlank() })
+                    parentRow.takeIf { region.carryTitle && title.isBlank() },region.fields[PlanField.TITLE])
             }
         }
         return ParsedPlan(items,issues.distinct(),excluded)
@@ -126,11 +126,12 @@ object Plans {
 
     fun scheduleItems(plan: ParsedPlan): List<PlanItem> {
         val transfers=plan.items.filter { it.kind==PlanKind.TRANSFER && it.day!=null }
-        val pausedExpenses=plan.items.filter { it.kind==PlanKind.EXPENSE && it.paused }.map { it.sourceRow }.toSet()
         return plan.items.filter { item -> item.day!=null && !item.paused &&
-            (item.kind!=PlanKind.TRANSFER || (item.parentRow ?: item.sourceRow) !in pausedExpenses) &&
-            (item.kind!=PlanKind.EXPENSE || transfers.none { it.sourceRow==item.sourceRow || it.parentRow==item.sourceRow }) }
+            (item.kind!=PlanKind.TRANSFER || plan.items.none { it.paused && relatedExpense(item,it) }) &&
+            (item.kind!=PlanKind.EXPENSE || transfers.none { relatedExpense(it,item) }) }
     }
+    fun relatedExpense(transfer: PlanItem,expense: PlanItem): Boolean = transfer.kind==PlanKind.TRANSFER && expense.kind==PlanKind.EXPENSE &&
+        transfer.titleColumn!=null && transfer.titleColumn==expense.titleColumn && (transfer.parentRow ?: transfer.sourceRow)==expense.sourceRow
 
     fun verifyStructure(grid: Grid, plan: PlanMapping) {
         check(plan.validate().isEmpty()) { plan.validate().joinToString("\n") }

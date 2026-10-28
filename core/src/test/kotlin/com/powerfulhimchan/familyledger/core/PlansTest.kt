@@ -76,6 +76,13 @@ class PlansTest {
         assertTrue(Plans.scheduleItems(parsed).none { it.kind==PlanKind.TRANSFER })
         assertEquals(BigDecimal("1365"),parsed.expense)
     }
+    @Test fun differentTablesSharingARowAreNotLinkedToEachOthersTransfers() {
+        val g=sample();val parsed=Plans.parse(g,PlanDetection.suggest(g))
+        val another=parsed.items.single { it.kind==PlanKind.EXPENSE && it.sourceRow==8 }.copy(regionId="other",titleColumn=0,note="보류")
+        val next=parsed.copy(items=parsed.items+another)
+        assertEquals(3,Plans.scheduleItems(next).count { it.kind==PlanKind.TRANSFER })
+        assertFalse(Plans.relatedExpense(parsed.items.first { it.kind==PlanKind.TRANSFER },another))
+    }
     @Test fun manualMappingsSupportDifferentNamesAndReorderedColumns() {
         val g=Grid("x",1,"Custom",listOf(listOf(Cell("Amount"),Cell("Label")),listOf(Cell("1.234,50"),Cell("Rent"))))
         val plan=PlanMapping(listOf(PlanRegion("custom","Bills",PlanKind.EXPENSE,1,2,mapOf(PlanField.AMOUNT to 0,PlanField.TITLE to 1))),NumberStyle.COMMA_DECIMAL)
